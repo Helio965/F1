@@ -61,6 +61,8 @@ Na nuvem, os testes de navegador usam `/usr/bin/chromium` com SwiftShader. Em ou
 
 CI está em `.github/workflows/ci.yml`. A publicação Pages é **manual** em `.github/workflows/pages.yml`: após revisar/mesclar, configure Settings → Pages → GitHub Actions e execute o workflow na branch desejada. O build usa caminhos relativos, inclusive após renomear o repositório. Estes arquivos não significam que o site já foi publicado.
 
+Resultados da execução: [docs/VALIDATION.md](docs/VALIDATION.md).
+
 ## Arquitetura e progresso
 
 | Área                            | Módulo                                 | Estado                                                |
