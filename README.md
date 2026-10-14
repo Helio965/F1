@@ -15,7 +15,7 @@ Abra o endereço exibido pelo Vite no Chrome local. Para produção: `npm run bu
 
 ## O que já funciona
 
-- Menu e diagnóstico real da GPU/contexto, classificação aproximada, perfis Baixa/Média/Alta, escala de resolução e adaptação com intervalo mínimo entre reduções.
+- Menu e diagnóstico real da GPU/contexto, classificação aproximada, perfis Baixa/Média/Alta, escala de resolução e adaptação com intervalo mínimo entre reduções. Sem preferências salvas, renderizadores por software iniciam em Baixa com escala de 60%. O perfil Baixa usa iluminação por vértice; Média/Alta usam PBR. `?quality=low|medium|high` força um perfil e suspende a adaptação.
 - Benchmark com dez carros e clima selecionado, compilação de shaders, aquecimento separado, medição mínima de 30 segundos, FPS médio/mínimo, 1% low, mediana, p95 e picos. Histórico, exportação JSON e recomendação sem inventar desempenho. Aba oculta, resize e perda de contexto invalidam a medição. [Método completo](docs/BENCHMARK.md).
 - Editor 2D por mouse ou toque: desenho livre de circuito fechado, pontos móveis, inserção/remoção, largura, elevação, desfazer/refazer e prévia 3D. Curva Catmull-Rom centrípeta com 768 amostras por comprimento de arco.
 - Validação de largura, extensão, cruzamentos, proximidade entre trechos, curvas e inclinações. Grid e checkpoints automáticos. Homologação explícita vinculada à versão; editar a estrutura exige nova validação.

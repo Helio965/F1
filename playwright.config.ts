@@ -17,6 +17,8 @@ export default defineConfig({
         "--enable-unsafe-swiftshader",
         "--use-angle=swiftshader",
         "--disable-dev-shm-usage",
+        "--disable-gpu-rasterization",
+        "--use-gl=angle",
       ],
     },
   },

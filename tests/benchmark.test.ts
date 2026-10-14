@@ -45,4 +45,15 @@ describe("benchmark real", () => {
     for (let i = 0; i < 120; i++) if (q.tick(0.1, "high")) changes++;
     expect(changes).toBe(1);
   });
+  it("restarts warmup on a cold shader stall but invalidates stalls during measurement", () => {
+    const b = new Benchmark(30, 1);
+    b.start();
+    b.tick(2500, 1);
+    expect(b.state).toBe("warmup");
+    expect(b.elapsed).toBe(0);
+    b.tick(1000, 1);
+    expect(b.state).toBe("measuring");
+    b.tick(2500, 1);
+    expect(b.state).toBe("invalid");
+  });
 });

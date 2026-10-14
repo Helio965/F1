@@ -3,7 +3,10 @@ test("opens real WebGL scene, persists setup, homologates and drives", async ({
   page,
 }) => {
   const errors: string[] = [];
-  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("pageerror", (e) => {
+    errors.push(e.message);
+    if (errors.length <= 3) console.error("Browser error:", e.message);
+  });
   await page.goto("/?quality=low");
   await expect(page.locator("#world canvas")).toBeVisible();
   await expect(
@@ -26,7 +29,7 @@ test("opens real WebGL scene, persists setup, homologates and drives", async ({
   await page.locator('select[name="cars"]').selectOption("2");
   await page.getByRole("button", { name: "Ir para o grid" }).click();
   await expect(page.locator("#speed")).toHaveText("0");
-  await page.waitForTimeout(3500);
+  await expect(page.locator("#countdown")).toHaveText("", { timeout: 30000 });
   await page.keyboard.down("w");
   await expect
     .poll(async () => Number(await page.locator("#speed").textContent()))
@@ -84,4 +87,44 @@ test("runs a complete 30 second benchmark and saves measured report", async ({
   await page.reload();
   await page.getByRole("button", { name: "Benchmark", exact: true }).click();
   await expect(page.locator("#history tbody tr")).toHaveCount(1);
+});
+
+test("draws a custom closed circuit, homologates and reloads its saved version", async ({
+  page,
+}) => {
+  await page.goto("/?quality=low");
+  await expect(page.locator("#world canvas")).toBeVisible();
+  await page.locator('[data-nav="editor"]').click();
+  await page.locator('[data-mode="draw"]').click();
+  const bounds = await page.locator("#editor-mount canvas").boundingBox();
+  expect(bounds).not.toBeNull();
+  const { x, y, width, height } = bounds!;
+  const cx = x + width / 2,
+    cy = y + height / 2,
+    rx = width * 0.32,
+    ry = height * 0.32;
+  await page.mouse.move(cx + rx, cy);
+  await page.mouse.down();
+  for (let i = 1; i <= 40; i++) {
+    const angle = (i / 40) * Math.PI * 2;
+    await page.mouse.move(cx + Math.cos(angle) * rx, cy + Math.sin(angle) * ry);
+  }
+  await page.mouse.up();
+  await page
+    .getByRole("textbox", { name: "Nome do circuito" })
+    .fill("Circuito de integração");
+  await page.keyboard.press("Tab");
+  await page.locator("#validate").click();
+  await expect(page.locator("#validation")).toContainText("Geometria validada");
+  await page.locator("#homologate").click();
+  await expect(page.locator("#validation")).toContainText(
+    "Circuito homologado",
+  );
+  await page.locator("#save-track").click();
+  await expect(page.locator("#toast")).toContainText("salva");
+  await page.reload();
+  await page.locator('[data-nav="circuits"]').click();
+  await expect(
+    page.locator(".circuit-card").filter({ hasText: "Circuito de integração" }),
+  ).toContainText("Homologado");
 });

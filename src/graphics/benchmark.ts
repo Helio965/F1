@@ -79,6 +79,10 @@ export class Benchmark {
   tick(ms: number, cpuMs: number, gpuMs: number | null = null) {
     if (!this.active) return;
     if (!Number.isFinite(ms) || ms <= 0) return;
+    if (ms > 2000 && this.state === "warmup") {
+      this.elapsed = 0;
+      return;
+    }
     if (ms > 2000) {
       this.invalidate(
         "Pausa de mais de 2 segundos detectada. Repita sem interromper o teste.",

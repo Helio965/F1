@@ -143,9 +143,14 @@ function disposeGroup(group: THREE.Object3D): void {
       o instanceof THREE.Points
     ) {
       geometries.add(o.geometry);
-      for (const material of Array.isArray(o.material)
-        ? o.material
-        : [o.material]) {
+      const owned: THREE.Material[] = Array.isArray(o.material)
+        ? [...o.material]
+        : [o.material];
+      const full = o.userData.fullMaterials as THREE.Material[] | undefined;
+      const low = o.userData.lowMaterials as THREE.Material[] | undefined;
+      if (full) owned.push(...full);
+      if (low) owned.push(...low);
+      for (const material of owned) {
         materials.add(material);
         for (const value of Object.values(material))
           if (value instanceof THREE.Texture) maps.add(value);
@@ -811,6 +816,55 @@ export class RacingWorld {
     this.circuitRoot.add(hills);
   }
 
+  /** Low uses vertex-lit materials, retaining original geometry, maps and liveries. */
+  private applyMaterialQuality(): void {
+    this.scene.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      const mesh = object as THREE.Mesh<
+        THREE.BufferGeometry,
+        THREE.Material | THREE.Material[]
+      >;
+      const data = mesh.userData as {
+        fullMaterials?: THREE.Material[];
+        lowMaterials?: THREE.Material[];
+        multipleMaterials?: boolean;
+      };
+      const current: THREE.Material[] = Array.isArray(mesh.material)
+        ? mesh.material
+        : [mesh.material];
+      if (
+        !data.fullMaterials &&
+        current.some(
+          (material) => material instanceof THREE.MeshStandardMaterial,
+        )
+      ) {
+        data.fullMaterials = current;
+        data.multipleMaterials = Array.isArray(mesh.material);
+        data.lowMaterials = current.map(
+          (material: THREE.Material): THREE.Material => {
+            if (!(material instanceof THREE.MeshStandardMaterial))
+              return material;
+            return new THREE.MeshLambertMaterial({
+              color: material.color,
+              map: material.map,
+              side: material.side,
+              vertexColors: material.vertexColors,
+              transparent: material.transparent,
+              opacity: material.opacity,
+              depthWrite: material.depthWrite,
+              emissive: material.emissive,
+              emissiveIntensity: material.emissiveIntensity,
+            });
+          },
+        );
+      }
+      const materials =
+        this.quality === "low" ? data.lowMaterials : data.fullMaterials;
+      if (materials)
+        mesh.material = data.multipleMaterials ? materials : materials[0];
+    });
+  }
+
   setQuality(quality: Quality, scale = 1): void {
     this.quality = quality;
     this.scale = scale;
@@ -833,6 +887,7 @@ export class RacingWorld {
           (quality === "low" ? 0.45 : quality === "medium" ? 0.7 : 1),
       );
     this.carModels.forEach((car) => setCarDetail(car, quality));
+    this.applyMaterialQuality();
     this.resize();
   }
 
@@ -992,6 +1047,12 @@ export class RacingWorld {
 
   async warmup(): Promise<void> {
     await this.renderer.compileAsync(this.scene, this.camera);
+    this.camera.position.set(0, 0, 0);
+    this.lastTime = 0;
+    for (const car of this.carModels) {
+      for (const wheel of (car.userData.wheels || []) as THREE.Object3D[])
+        wheel.rotation.x = 0;
+    }
   }
 
   dispose(): void {

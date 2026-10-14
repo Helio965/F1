@@ -457,7 +457,7 @@ async function startBenchmark() {
   }
 }
 function updateBenchmark() {
-  if (!benchmark || page !== "benchmark") return;
+  if (!benchmark || page !== "benchmark" || benchmarkPreparing) return;
   const status = $("#benchmark-status");
   const b = benchmark;
   status.textContent =
@@ -697,12 +697,13 @@ function startRace(
   settings.weather = options.weather;
   navigate("race");
   world.setWeather(options.weather);
+  previous = performance.now();
   if (training)
     toast("Treino livre: use W/A/S/D ou as setas. R reposiciona o carro.");
 }
 function renderRace() {
   $("#content").innerHTML =
-    `<section class="race-stage"><div id="scene-mount"></div><div class="race-top"><div class="race-session"><span class="eyebrow">${escape(circuit.name)}</span><strong id="race-lap">VOLTA 1</strong></div><div id="race-position">P1</div><button class="secondary" id="pause-race">Ⅱ Pausar</button></div><div id="leaderboard" class="leaderboard"></div><div id="countdown" class="countdown"></div><canvas id="minimap" width="240" height="170" aria-label="Minimapa da corrida"></canvas><div class="telemetry"><div class="rpm-bar"><i id="rpm-bar"></i></div><div class="speed-row"><div><strong id="speed">0</strong><span>KM/H</span></div><b id="gear">N</b></div><div class="telemetry-extra" id="car-condition"></div></div><div id="lap-timing" class="lap-timing"></div><div id="fps" class="fps"></div><div class="race-controls"><span>W A S D <b>DIRIGIR</b></span><span>C <b>CÂMERA</b></span><span>R <b>REPOSICIONAR</b></span><span>ESC <b>PAUSA</b></span></div><div class="touch-controls"><button data-touch="ArrowLeft" aria-label="Virar à esquerda">←</button><button data-touch="ArrowRight" aria-label="Virar à direita">→</button><button data-touch="ArrowDown" aria-label="Frear">FREIO</button><button data-touch="ArrowUp" aria-label="Acelerar">GÁS</button></div></section>`;
+    `<section class="race-stage"><div id="scene-mount"></div><div class="race-top"><div class="race-session"><span class="eyebrow">${escape(circuit.name)}</span><strong id="race-lap">VOLTA 1</strong></div><div id="race-position">P1</div><button class="secondary" id="pause-race">Ⅱ Pausar</button></div><div id="leaderboard" class="leaderboard"></div><div id="countdown" class="countdown">${countdown > 0 ? Math.ceil(countdown) : ""}</div><canvas id="minimap" width="240" height="170" aria-label="Minimapa da corrida"></canvas><div class="telemetry"><div class="rpm-bar"><i id="rpm-bar"></i></div><div class="speed-row"><div><strong id="speed">0</strong><span>KM/H</span></div><b id="gear">N</b></div><div class="telemetry-extra" id="car-condition"></div></div><div id="lap-timing" class="lap-timing"></div><div id="fps" class="fps"></div><div class="race-controls"><span>W A S D <b>DIRIGIR</b></span><span>C <b>CÂMERA</b></span><span>R <b>REPOSICIONAR</b></span><span>ESC <b>PAUSA</b></span></div><div class="touch-controls"><button data-touch="ArrowLeft" aria-label="Virar à esquerda">←</button><button data-touch="ArrowRight" aria-label="Virar à direita">→</button><button data-touch="ArrowDown" aria-label="Frear">FREIO</button><button data-touch="ArrowUp" aria-label="Acelerar">GÁS</button></div></section>`;
   $("#pause-race").onclick = togglePause;
   document.querySelectorAll<HTMLElement>("[data-touch]").forEach((el) => {
     el.onpointerdown = (e) => {
@@ -718,6 +719,7 @@ function togglePause() {
   paused = !paused;
   keys.clear();
   if (!paused) {
+    previous = performance.now();
     $<HTMLDialogElement>("#modal").close();
     return;
   }
@@ -955,7 +957,10 @@ async function init() {
       renderHome();
       mountWorld();
     }
-    timer = new GpuTimer(world.renderer.getContext() as WebGL2RenderingContext);
+    timer =
+      gpu.kind === "Software"
+        ? undefined
+        : new GpuTimer(world.renderer.getContext() as WebGL2RenderingContext);
     world.renderer.domElement.addEventListener(
       "webglcontextlost",
       (e: Event) => {
@@ -993,9 +998,9 @@ function frame(now: number) {
     fpsTime = 0;
   }
   if (sim && !paused) {
-    if (countdown > 0) countdown -= dt;
+    if (countdown > 0) countdown -= raw;
     else {
-      accumulator += dt;
+      accumulator += Math.min(raw, 5);
       const input = readInput();
       while (accumulator >= 1 / 120) {
         previousCars = sim.cars.map((c) => ({ ...c }));
