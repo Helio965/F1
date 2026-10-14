@@ -1,0 +1,30 @@
+{
+  "name": "apex-racing-lab",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit --noUnusedLocals --noUnusedParameters",
+    "test": "vitest run",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@fontsource/barlow-condensed": "^5.3.0",
+    "@fontsource/dm-sans": "^5.3.0",
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "@types/three": "0.170.0",
+    "typescript": "~5.7.3",
+    "vite": "^6.4.0",
+    "vitest": "^5.0.4"
+  },
+  "engines": {
+    "node": ">=24 <25"
+  }
+}
