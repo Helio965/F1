@@ -163,9 +163,23 @@ class Suspension:
                 f += (-arb_r if yi > 0.0 else arb_r) * ph / tr
                 lat = lat_r
                 lng = -0.5 * long_t
-            load = m_u[i] * g_ratio + self.static_sprung[i] + f + (lat if yi < 0.0 else -lat) + lng
-            loads[i] = load if load > 0.0 else 0.0
+            loads[i] = m_u[i] * g_ratio + self.static_sprung[i] + f + (lat if yi < 0.0 else -lat) + lng
             defl[i] = d
+        # Tyre contact is one-sided: a corner whose load would be negative
+        # lifts, and the axle's whole load goes to the other wheel (the axle
+        # cannot transfer more roll moment than its total load). This keeps
+        # sum Fz equal to the weight plus downforce when a wheel lifts.
+        for i in (0, 2):
+            left = loads[i]
+            right = loads[i + 1]
+            if left + right <= 0.0:
+                loads[i] = loads[i + 1] = 0.0
+            elif left < 0.0:
+                loads[i] = 0.0
+                loads[i + 1] = left + right
+            elif right < 0.0:
+                loads[i] = left + right
+                loads[i + 1] = 0.0
         self.ride_front = self.h_front0 + z - self.a * th
         self.ride_rear = self.h_rear0 + z + self.b * th
         return loads

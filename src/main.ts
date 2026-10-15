@@ -523,10 +523,21 @@ interface PhysicsBenchCase {
   step_mean_ms: number;
   step_p95_ms: number;
   step_p99_ms: number;
+  step_max_ms: number;
   per_car_ms: number;
   ai_mean_ms: number;
   realtime_load: number;
+  realtime_load_p99: number;
 }
+interface PhysicsBenchSummary {
+  physics: PhysicsBenchCase[];
+  analysis: Record<string, number>;
+  snapshot: { snapshot_ms: number; frame_60hz_mean_ms: number; frame_60hz_p99_ms: number };
+  memory: { peak_mb: number; analysis_peak_mb: number };
+  environment: { python_version: string };
+  total_s: number;
+}
+const BENCH_CIRCUITS: Record<string, string> = { aurora: "Aurora Park (1,0 km)", oval: "oval (3,3 km)" };
 async function runPhysicsBenchmark() {
   const out = $("#physics-bench-result");
   const button = $<HTMLButtonElement>("#physics-bench-btn");
@@ -535,18 +546,16 @@ async function runPhysicsBenchmark() {
   try {
     const client = await requirePhysics();
     const latency = await client.ping(120);
-    const result = await client.benchmark<Record<string, unknown>>(true);
-    const physicsCases = (result.physics as PhysicsBenchCase[] | undefined) ?? [];
-    const analysis = (result.analysis as Record<string, number> | undefined) ?? {};
-    const memory = result.memory as Record<string, number> | undefined;
-    out.innerHTML = `<div class="table-scroll"><table><thead><tr><th>CARROS / CLIMA</th><th>PASSO MÉDIO</th><th>P95</th><th>P99</th><th>POR CARRO</th><th>IA</th><th>CARGA EM TEMPO REAL</th></tr></thead><tbody>${physicsCases
+    const result = await client.benchmark<PhysicsBenchSummary>(true);
+    const ms = (v: number) => `${v.toFixed(3)} ms`;
+    out.innerHTML = `<div class="table-scroll"><table><thead><tr><th>CARROS / CLIMA</th><th>PASSO MÉDIO</th><th>P95</th><th>P99</th><th>MÁX.</th><th>POR CARRO</th><th>IA</th><th>CARGA (MÉDIA / P99)</th></tr></thead><tbody>${result.physics
       .map(
         (c) =>
-          `<tr><td>${c.cars} / ${escape(c.weather)}</td><td>${c.step_mean_ms.toFixed(3)} ms</td><td>${c.step_p95_ms.toFixed(3)} ms</td><td>${c.step_p99_ms.toFixed(3)} ms</td><td>${c.per_car_ms.toFixed(3)} ms</td><td>${c.ai_mean_ms.toFixed(3)} ms</td><td>${(c.realtime_load * 100).toFixed(1)}%</td></tr>`,
+          `<tr><td>${c.cars} / ${escape(c.weather)}</td><td>${ms(c.step_mean_ms)}</td><td>${ms(c.step_p95_ms)}</td><td>${ms(c.step_p99_ms)}</td><td>${ms(c.step_max_ms)}</td><td>${ms(c.per_car_ms)}</td><td>${ms(c.ai_mean_ms)}</td><td>${(c.realtime_load * 100).toFixed(1)}% / ${(c.realtime_load_p99 * 100).toFixed(1)}%</td></tr>`,
       )
-      .join("")}</tbody></table></div><p class="small muted">Análise de pista: ${Object.entries(analysis)
-      .map(([k, v]) => `${escape(k)} ${Number(v).toFixed(0)} ms`)
-      .join(" · ")}. Memória Python (pico): ${memory ? `${Number(memory.peak_mb ?? 0).toFixed(1)} MB` : "indisponível"}. Latência ida e volta da mensagem ao Worker: mediana ${latency.median.toFixed(2)} ms, p95 ${latency.p95.toFixed(2)} ms. Pyodide ${escape(client.status.pyodide)} carregado em ${client.status.initMs?.toFixed(0)} ms (motor em ${client.status.importMs?.toFixed(0)} ms). Carga = tempo de física ÷ 8,33 ms por passo; acima de 100% a simulação não acompanha o tempo real.</p>`;
+      .join("")}</tbody></table></div><p class="small muted">Análise completa de pista (mediana): ${Object.entries(result.analysis)
+      .map(([k, v]) => `${escape(BENCH_CIRCUITS[k] ?? k)} ${v.toFixed(0)} ms`)
+      .join(" · ")}. Quadro de 60 Hz (2 passos + estado): média ${ms(result.snapshot.frame_60hz_mean_ms)}, p99 ${ms(result.snapshot.frame_60hz_p99_ms)}. Memória Python (pico, tracemalloc): sessão de 10 carros ${result.memory.peak_mb.toFixed(2)} MB, análise ${result.memory.analysis_peak_mb.toFixed(2)} MB. Latência ida e volta da mensagem ao Worker: mediana ${latency.median.toFixed(2)} ms, p95 ${latency.p95.toFixed(2)} ms. Pyodide ${escape(client.status.pyodide)} (Python ${escape(result.environment.python_version)}) carregado em ${client.status.initMs?.toFixed(0)} ms (motor em ${client.status.importMs?.toFixed(0)} ms); medição total ${result.total_s.toFixed(1)} s. Carga = tempo de física ÷ 8,33 ms por passo; acima de 100% a simulação não acompanha o tempo real.</p>`;
   } catch (e) {
     out.innerHTML = `<p class="muted">Não foi possível medir: ${escape((e as Error).message)}</p>`;
   } finally {

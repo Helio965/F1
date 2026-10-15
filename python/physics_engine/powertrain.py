@@ -126,7 +126,8 @@ class Powertrain:
             self.fuel = max(0.0, self.fuel - p.bsfc * self.engine_power * dt)
         torque = engine * ratio * (p.driveline_efficiency if engine > 0.0 else 1.0)
         # ERS deployment (at the axle, behaves like extra power at full throttle).
-        if p.ers_power > 0.0 and throttle > 0.9 and self.shift_timer <= 0.0 and self.gear > 0:
+        # The rev limiter cuts the whole power unit, ERS included.
+        if p.ers_power > 0.0 and throttle > 0.9 and self.shift_timer <= 0.0 and self.gear > 0 and not self.limiter:
             budget = min(p.ers_deploy_per_lap - self.ers_deployed, self.ers_store)
             w = abs(axle_omega)
             if budget > 0.0 and w > 5.0:

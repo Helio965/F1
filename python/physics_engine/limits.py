@@ -85,7 +85,7 @@ class PerformanceEnvelope:
             force = torque * g * p.driveline_efficiency / self.radius
             if force > best:
                 best = force
-        if self.use_ers:
+        if self.use_ers and best > 0.0:
             best += p.ers_power / max(v, 8.0)
         return best
 
