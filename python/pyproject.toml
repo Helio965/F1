@@ -1,0 +1,19 @@
+[project]
+name = "apex-physics"
+version = "1.0.0"
+description = "APEX Racing Lab: universal vehicle physics, track analysis and deterministic racing AI (pure Python, stdlib only)."
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "verification: checks that the code implements the documented equations (analytic or self-consistency references)",
+  "validation: compares emergent behaviour against public, cited reference envelopes (plausibility, not calibration)",
+  "slow: long-running scenario (full laps, many cars)",
+]
+addopts = "-q"
