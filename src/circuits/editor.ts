@@ -2,12 +2,14 @@ import type { Circuit, Point3 } from "../core/types";
 import { sampleCircuit } from "./geometry";
 import { cloneCircuit, reviseCircuit } from "./model";
 
-type State = Pick<Circuit, "name" | "width" | "points">;
+type State = Pick<Circuit, "name" | "width" | "points" | "surface" | "runoff">;
 type Mode = "edit" | "draw" | "add";
 const snapshot = (c: Circuit): State => ({
   name: c.name,
   width: c.width,
   points: c.points.map((p) => ({ ...p })),
+  surface: c.surface ? { ...c.surface } : undefined,
+  runoff: c.runoff ? { ...c.runoff } : undefined,
 });
 const distance = (a: Point3, b: Point3) => Math.hypot(a.x - b.x, a.z - b.z);
 
@@ -25,11 +27,11 @@ export function mountCircuitEditor(
   root.innerHTML = `<style>
     .ce-tools{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}.ce-tools button{background:#17232b;border:1px solid #36434a;color:#d5e2e9;border-radius:6px;padding:8px 10px;font:inherit;font-size:12px;cursor:pointer}.ce-tools button[aria-pressed=true]{background:#c8ec72;color:#14200e}.ce-tools button:disabled{opacity:.35}
     .ce-map{height:clamp(290px,44vh,470px);background:#101b22;position:relative;overflow:hidden;border:1px solid #34434b;border-radius:8px}.ce-map canvas{width:100%;height:100%;display:block;touch-action:none;cursor:crosshair}.ce-map span{position:absolute;left:14px;top:12px;font:10px monospace;letter-spacing:1px;color:#99acb5;pointer-events:none}
-    .ce-fields{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}.ce-fields label{font-size:11px;color:#a0b0bb;display:flex;flex-direction:column;gap:7px}.ce-fields input{min-width:0;accent-color:#c8ec72}.ce-fields input[type=text]{padding:10px;border:1px solid #36434a;border-radius:6px;background:#14212a;color:#e8edf1}.ce-name{grid-column:1/-1}.ce-status{font-size:12px;line-height:1.6;min-height:36px;color:#a2b5bf}.ce-map:focus-within{outline:1px solid #c8ec72}@media(max-width:520px){.ce-fields{grid-template-columns:1fr}.ce-map{height:310px}}
+    .ce-fields{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}.ce-fields label{font-size:11px;color:#a0b0bb;display:flex;flex-direction:column;gap:7px}.ce-fields input,.ce-fields select{min-width:0;accent-color:#c8ec72}.ce-fields select{padding:9px;border:1px solid #36434a;border-radius:6px;background:#14212a;color:#e8edf1;font:inherit;font-size:12px}.ce-fields input[type=text]{padding:10px;border:1px solid #36434a;border-radius:6px;background:#14212a;color:#e8edf1}.ce-name{grid-column:1/-1}.ce-status{font-size:12px;line-height:1.6;min-height:36px;color:#a2b5bf}.ce-map:focus-within{outline:1px solid #c8ec72}@media(max-width:520px){.ce-fields{grid-template-columns:1fr}.ce-map{height:310px}}
     </style><div class="ce-tools" role="toolbar" aria-label="Ferramentas do circuito">
     <button type="button" data-mode="edit">↖ Mover</button><button type="button" data-mode="draw">✎ Desenhar</button><button type="button" data-mode="add">＋ Ponto</button><button type="button" data-action="remove">− Ponto</button><button type="button" data-action="undo" aria-label="Desfazer">↶</button><button type="button" data-action="redo" aria-label="Refazer">↷</button><button type="button" data-action="fit">Enquadrar</button></div>
     <div class="ce-map"><canvas tabindex="0" aria-label="Editor da pista: arraste os pontos de controle para editar o circuito"></canvas><span>CIRCUIT DESIGN · VISTA SUPERIOR</span></div>
-    <div class="ce-fields"><label class="ce-name">NOME DO CIRCUITO<input data-field="name" aria-label="Nome do circuito" maxlength="80"></label><label>LARGURA <output data-value="width"></output><input data-field="width" aria-label="Largura da pista em metros" type="range" min="8" max="24" step="0.5"></label><label>ELEVAÇÃO DO PONTO <output data-value="height"></output><input data-field="height" aria-label="Elevação do ponto em metros" type="range" min="-30" max="60" step="0.5"></label></div><p class="ce-status" aria-live="polite"></p>`;
+    <div class="ce-fields"><label class="ce-name">NOME DO CIRCUITO<input data-field="name" aria-label="Nome do circuito" maxlength="80"></label><label>LARGURA <output data-value="width"></output><input data-field="width" aria-label="Largura da pista em metros" type="range" min="8" max="24" step="0.5"></label><label>ELEVAÇÃO DO PONTO <output data-value="height"></output><input data-field="height" aria-label="Elevação do ponto em metros" type="range" min="-30" max="60" step="0.5"></label><label>INCLINAÇÃO LATERAL DO PONTO <output data-value="bank"></output><input data-field="bank" aria-label="Inclinação lateral do ponto em graus" type="range" min="-12" max="12" step="0.5"></label><label>ASFALTO<select data-field="asphalt" aria-label="Tipo de asfalto"><option value="standard">Padrão</option><option value="smooth">Liso (menos desgaste, drena menos)</option><option value="abrasive">Abrasivo (mais aderência e desgaste)</option></select></label><label>ÁREA DE ESCAPE<select data-field="runoff" aria-label="Tipo de área de escape"><option value="mixed">Mista (brita em curvas rápidas)</option><option value="grass">Grama</option><option value="gravel">Brita</option><option value="asphalt">Asfalto</option></select></label><label>LARGURA DO ESCAPE <output data-value="runoffWidth"></output><input data-field="runoffWidth" aria-label="Largura da área de escape em metros" type="range" min="2" max="30" step="0.5"></label></div><p class="ce-status" aria-live="polite"></p>`;
   container.append(root);
   const canvas = root.querySelector("canvas")!;
   const context = canvas.getContext("2d");
@@ -38,6 +40,12 @@ export function mountCircuitEditor(
   const name = root.querySelector<HTMLInputElement>("[data-field=name]")!;
   const width = root.querySelector<HTMLInputElement>("[data-field=width]")!;
   const height = root.querySelector<HTMLInputElement>("[data-field=height]")!;
+  const bank = root.querySelector<HTMLInputElement>("[data-field=bank]")!;
+  const asphalt = root.querySelector<HTMLSelectElement>("[data-field=asphalt]")!;
+  const runoffType = root.querySelector<HTMLSelectElement>("[data-field=runoff]")!;
+  const runoffWidth = root.querySelector<HTMLInputElement>("[data-field=runoffWidth]")!;
+  const bankValue = root.querySelector<HTMLOutputElement>("[data-value=bank]")!;
+  const runoffValue = root.querySelector<HTMLOutputElement>("[data-value=runoffWidth]")!;
   const widthValue =
     root.querySelector<HTMLOutputElement>("[data-value=width]")!;
   const heightValue = root.querySelector<HTMLOutputElement>(
@@ -103,6 +111,13 @@ export function mountCircuitEditor(
     heightValue.textContent = p
       ? `${p.y.toFixed(1)} m · ponto ${selected + 1}`
       : "selecione um ponto";
+    bank.disabled = !p;
+    bank.value = String(p?.bank ?? 0);
+    bankValue.textContent = p ? `${(p.bank ?? 0).toFixed(1)}° · ${(p.bank ?? 0) > 0 ? "esquerda mais alta" : (p.bank ?? 0) < 0 ? "direita mais alta" : "plano"}` : "selecione um ponto";
+    asphalt.value = circuit.surface?.asphalt ?? "standard";
+    runoffType.value = circuit.runoff?.type ?? "mixed";
+    runoffWidth.value = String(circuit.runoff?.width ?? 6.5);
+    runoffValue.textContent = `${Number(runoffWidth.value).toFixed(1)} m`;
     undo.disabled = cursor === 0;
     redo.disabled = cursor === history.length - 1;
     remove.disabled = circuit.points.length <= 6 || !p;
@@ -308,6 +323,57 @@ export function mountCircuitEditor(
     },
     events,
   );
+  bank.addEventListener(
+    "input",
+    () => {
+      bankValue.textContent = `${Number(bank.value).toFixed(1)}° · ponto ${selected + 1}`;
+    },
+    events,
+  );
+  bank.addEventListener(
+    "change",
+    () => {
+      if (circuit.points[selected])
+        commit({
+          points: circuit.points.map((p, i) => (i === selected ? { ...p, bank: Number(bank.value) } : p)),
+        });
+    },
+    events,
+  );
+  asphalt.addEventListener(
+    "change",
+    () => commit({ surface: { asphalt: asphalt.value as NonNullable<Circuit["surface"]>["asphalt"] } }),
+    events,
+  );
+  runoffType.addEventListener(
+    "change",
+    () =>
+      commit({
+        runoff: {
+          type: runoffType.value as NonNullable<Circuit["runoff"]>["type"],
+          width: Number(runoffWidth.value),
+        },
+      }),
+    events,
+  );
+  runoffWidth.addEventListener(
+    "input",
+    () => {
+      runoffValue.textContent = `${Number(runoffWidth.value).toFixed(1)} m`;
+    },
+    events,
+  );
+  runoffWidth.addEventListener(
+    "change",
+    () =>
+      commit({
+        runoff: {
+          type: runoffType.value as NonNullable<Circuit["runoff"]>["type"],
+          width: Number(runoffWidth.value),
+        },
+      }),
+    events,
+  );
   canvas.addEventListener(
     "pointerdown",
     (e) => {
@@ -351,7 +417,11 @@ export function mountCircuitEditor(
         const a = circuit.points[edge],
           b = circuit.points[(edge + 1) % circuit.points.length],
           points = circuit.points.map((q) => ({ ...q }));
-        points.splice(edge + 1, 0, { ...p, y: a.y + (b.y - a.y) * ratio });
+        points.splice(edge + 1, 0, {
+          ...p,
+          y: a.y + (b.y - a.y) * ratio,
+          bank: (a.bank ?? 0) + ((b.bank ?? 0) - (a.bank ?? 0)) * ratio,
+        });
         selected = edge + 1;
         commit({ points });
         return;

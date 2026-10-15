@@ -561,10 +561,59 @@ export function createFormulaCar(color: string, id: number): THREE.Group {
       wheels.push(wheel);
     }
   }
+  // Body meshes live in their own group so the body can be fitted to the
+  // simulated vehicle (wheelbase) while wheels follow physics positions.
+  const body = new THREE.Group();
+  body.name = "body";
+  for (const child of [...car.children])
+    if (!wheels.includes(child as THREE.Group)) body.add(child);
+  car.add(body);
+  for (const wheel of wheels) {
+    wheel.rotation.order = "YXZ";
+    wheel.userData.baseY = wheel.position.y;
+    wheel.userData.baseZ = wheel.position.z;
+  }
+  car.rotation.order = "YXZ";
+  car.userData.body = body;
   car.userData.wheels = wheels;
   car.userData.detailMeshes = detailMeshes;
   car.userData.carId = id;
   return car;
+}
+
+/** Geometry of the simulated vehicle used to fit the procedural model. */
+export interface CarFit {
+  wheelbase: number;
+  /** CG to front axle (m). */
+  front: number;
+  /** CG to rear axle (m). */
+  rear: number;
+  radiusFront: number;
+  radiusRear: number;
+}
+
+const MODEL_WHEELBASE = 2.78;
+const MODEL_RADIUS = 0.365;
+
+/**
+ * Stretch the body along its length to the simulated wheelbase and place the
+ * wheels on the simulated axles (origin = centre of gravity), so the visual
+ * contact patches coincide with the physics ones. Track width stays visual.
+ */
+export function fitCarToVehicle(car: THREE.Group, fit: CarFit): void {
+  const body = car.userData.body as THREE.Group | undefined;
+  if (body) {
+    body.scale.z = fit.wheelbase / MODEL_WHEELBASE;
+    body.position.z = (fit.front - fit.rear) / 2;
+  }
+  for (const wheel of (car.userData.wheels ?? []) as THREE.Group[]) {
+    const front = !!wheel.userData.front;
+    const radius = front ? fit.radiusFront : fit.radiusRear;
+    wheel.scale.setScalar(radius / MODEL_RADIUS);
+    wheel.userData.baseZ = front ? fit.front : -fit.rear;
+    wheel.userData.baseY = radius;
+    wheel.position.set(wheel.position.x, radius, wheel.userData.baseZ);
+  }
 }
 
 export function setCarDetail(group: THREE.Group, quality: Detail): void {

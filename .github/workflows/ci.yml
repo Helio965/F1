@@ -5,17 +5,32 @@ on:
 permissions:
   contents: read
 jobs:
-  test:
+  python:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # The physics core is standard-library only; pytest is the only test dependency.
+      - run: python -m pip install --upgrade pip pytest
+      - run: cd python && python -m pytest
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: npm
       - run: npm ci
       - run: npm run lint
+      # Includes the Pyodide bridge test, which compares Pyodide with native CPython.
       - run: npm test
       - run: npm run build
       - run: npx playwright install --with-deps chromium

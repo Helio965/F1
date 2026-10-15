@@ -1,4 +1,7 @@
-import type { Circuit, Point3 } from "../core/types";
+import type { AsphaltType, Circuit, Point3, RunoffType } from "../core/types";
+
+const ASPHALT: AsphaltType[] = ["standard", "smooth", "abrasive"];
+const RUNOFF: RunoffType[] = ["mixed", "grass", "gravel", "asphalt"];
 
 const MAX_POINTS = 128;
 const MAX_COORDINATE = 10_000;
@@ -35,13 +38,17 @@ export function defaultCircuit(): Circuit {
 }
 
 export function cloneCircuit(circuit: Circuit): Circuit {
-  return { ...circuit, points: circuit.points.map((point) => ({ ...point })) };
+  const copy: Circuit = { ...circuit, points: circuit.points.map((point) => ({ ...point })) };
+  if (circuit.surface) copy.surface = { ...circuit.surface };
+  if (circuit.runoff) copy.runoff = { ...circuit.runoff };
+  if (circuit.environment) copy.environment = { ...circuit.environment };
+  return copy;
 }
 
 /** Every edit produces a new revision and revokes an earlier homologation. */
 export function reviseCircuit(
   circuit: Circuit,
-  changes: Partial<Pick<Circuit, "name" | "width" | "points">>,
+  changes: Partial<Pick<Circuit, "name" | "width" | "points" | "surface" | "runoff">>,
 ): Circuit {
   const revision = cloneCircuit({
     ...circuit,
@@ -49,6 +56,7 @@ export function reviseCircuit(
     version: circuit.version + 1,
   });
   delete revision.homologatedVersion;
+  delete revision.homologatedHash;
   return revision;
 }
 
@@ -72,11 +80,15 @@ export function importCircuit(text: string): Circuit {
       "width",
       "points",
       "homologatedVersion",
+      "homologatedHash",
+      "surface",
+      "runoff",
+      "environment",
     ])
   ) {
     throw new Error("Formato de circuito desconhecido.");
   }
-  if (data.schemaVersion !== undefined && data.schemaVersion !== 1)
+  if (data.schemaVersion !== undefined && data.schemaVersion !== 1 && data.schemaVersion !== 2)
     throw new Error("Versão do formato de circuito não suportada.");
   if (
     typeof data.id !== "string" ||
@@ -112,7 +124,8 @@ export function importCircuit(text: string): Circuit {
   const points: Point3[] = data.points.map((point) => {
     if (
       !isObject(point) ||
-      !ownKeys(point, ["x", "y", "z"]) ||
+      !ownKeys(point, ["x", "y", "z", "bank"]) ||
+      (point.bank !== undefined && (!finite(point.bank) || Math.abs(point.bank) > 20)) ||
       !finite(point.x) ||
       !finite(point.y) ||
       !finite(point.z) ||
@@ -124,13 +137,58 @@ export function importCircuit(text: string): Circuit {
         "Cada ponto precisa de coordenadas finitas dentro da área permitida.",
       );
     }
-    return { x: point.x, y: point.y, z: point.z };
+    const parsed: Point3 = { x: point.x, y: point.y, z: point.z };
+    if (point.bank !== undefined && point.bank !== 0) parsed.bank = point.bank as number;
+    return parsed;
   });
-  return {
+  const circuit: Circuit = {
     id: data.id,
     version: data.version as number,
     name: data.name.trim(),
     width: data.width,
     points,
   };
+  if (data.surface !== undefined) {
+    if (
+      !isObject(data.surface) ||
+      !ownKeys(data.surface, ["asphalt"]) ||
+      !ASPHALT.includes(data.surface.asphalt as AsphaltType)
+    )
+      throw new Error("Tipo de asfalto inválido.");
+    circuit.surface = { asphalt: data.surface.asphalt as AsphaltType };
+  }
+  if (data.runoff !== undefined) {
+    if (
+      !isObject(data.runoff) ||
+      !ownKeys(data.runoff, ["type", "width"]) ||
+      !RUNOFF.includes(data.runoff.type as RunoffType) ||
+      !finite(data.runoff.width) ||
+      data.runoff.width < 1.5 ||
+      data.runoff.width > 40
+    )
+      throw new Error("Área de escape inválida.");
+    circuit.runoff = { type: data.runoff.type as RunoffType, width: data.runoff.width };
+  }
+  if (data.environment !== undefined) {
+    const env = data.environment;
+    if (
+      !isObject(env) ||
+      !ownKeys(env, ["altitude", "exposure"]) ||
+      !finite(env.altitude) ||
+      env.altitude < -500 ||
+      env.altitude > 4500 ||
+      !finite(env.exposure) ||
+      env.exposure < 0 ||
+      env.exposure > 1
+    )
+      throw new Error("Condições ambientais inválidas.");
+    circuit.environment = { altitude: env.altitude, exposure: env.exposure };
+  }
+  return circuit;
+}
+
+/** JSON document for export (schema 2 adds banking, surface, run-off and environment). */
+export function exportCircuit(circuit: Circuit): string {
+  const { homologatedVersion: _v, homologatedHash: _h, ...rest } = circuit;
+  return JSON.stringify({ schemaVersion: 2, ...rest }, null, 2);
 }
