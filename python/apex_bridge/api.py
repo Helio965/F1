@@ -11,7 +11,7 @@ from array import array
 from physics_engine import ENGINE_VERSION
 from physics_engine.contract import describe
 from physics_engine.vehicles import VEHICLES, vehicle_summary
-from track_analyzer.analyzer import ANALYZER_VERSION, analyze
+from track_analyzer.analyzer import ANALYZER_VERSION, CONTRACT, analyze
 
 from .session import Session
 
@@ -37,13 +37,26 @@ def analyze_track(document_json, level="full"):
         _analyses[result["hash"]] = result
         while len(_analyses) > 6:
             _analyses.pop(next(iter(_analyses)))
-    return json.dumps(result, separators=(",", ":"))
+    # allow_nan=False: the browser's JSON.parse rejects NaN/Infinity tokens.
+    return json.dumps(result, separators=(",", ":"), allow_nan=False)
 
 
 def remember_analysis(analysis_json):
     """Register a cached analysis (e.g. from IndexedDB) after the worker restarts."""
     result = json.loads(analysis_json)
+    if (
+        result.get("contract") != CONTRACT
+        or result.get("analyzer_version") != ANALYZER_VERSION
+        or result.get("engine_version") != ENGINE_VERSION
+        or result.get("level") != "full"
+        or not result.get("valid")
+    ):
+        # A cache from another analyser/engine version is derived data that no
+        # longer matches the physics: the caller must analyse again.
+        raise ValueError("Análise em cache incompatível com esta versão do motor; refaça a análise.")
     _analyses[result["hash"]] = result
+    while len(_analyses) > 6:
+        _analyses.pop(next(iter(_analyses)))
     return result["hash"]
 
 

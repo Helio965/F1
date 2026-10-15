@@ -314,9 +314,12 @@ class SurfaceState:
         """Incremental update: a slice of segments each physics step."""
         self.timer += dt
         per_step = max(1, int(math.ceil(self.segments * dt / WATER_UPDATE_INTERVAL)))
+        # Each segment is revisited once every ceil(segments / per_step) steps:
+        # integrate exactly that much real time (<= WATER_UPDATE_INTERVAL + dt).
+        cycle = math.ceil(self.segments / per_step) * dt
         start = self.cursor
         end = min(self.segments, start + per_step)
-        self._update_range(start, end, WATER_UPDATE_INTERVAL, atmosphere)
+        self._update_range(start, end, cycle, atmosphere)
         self.cursor = 0 if end >= self.segments else end
         if self.cursor == 0:
             self.version += 1
@@ -387,9 +390,17 @@ class SurfaceState:
         return list(self.water)
 
     def average_wetness(self, start_s=0.0, end_s=None):
-        """Mean film depth (mm) across the asphalt over a lap range."""
+        """Mean film depth (mm) across the asphalt over a lap range.
+
+        The whole-lap mean is cached per surface version (one full update
+        cycle), so calling it every physics step costs O(1).
+        """
         if end_s is None:
-            return sum(self.water) / len(self.water)
+            cached = getattr(self, "_mean_cache", None)
+            if cached is None or cached[0] != self.version:
+                cached = (self.version, sum(self.water) / len(self.water))
+                self._mean_cache = cached
+            return cached[1]
         k0 = int((start_s % self.track.length) / self.seg_length)
         k1 = int((end_s % self.track.length) / self.seg_length)
         total = 0.0

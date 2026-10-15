@@ -87,8 +87,13 @@ class SpeedPlan:
         k = min(range(len(self.ladder)), key=lambda q: abs(self.ladder[q] - grip))
         return self.envelopes[k].deceleration(speed, 0.0, 0.0, 0.0, 0.0)
 
-    def refresh_grip(self, surface, pressure_kpa):
-        """Observed wet-grip ratio along the racing line (called a few times per second)."""
+    def refresh_grip(self, surface, pressure_kpa, start=0, count=None):
+        """Observed wet-grip ratio along the racing line.
+
+        Processes ``count`` water segments from ``start`` (all by default) and
+        returns the next segment index, so callers can spread one sweep over
+        many physics steps instead of paying O(track length) in one step.
+        """
         tr = self.track
         tyre = self.tyre
         width = self.params.tyre_width_rear
@@ -96,7 +101,8 @@ class SpeedPlan:
         n = tr.n
         estimate = self.grip_estimate
         lanes = surface.lanes
-        for k in range(surface.segments):
+        end = surface.segments if count is None else min(surface.segments, start + count)
+        for k in range(start, end):
             i = surface.seg_index[k]
             half = tr.half_width[i]
             lane = int((self.offsets[i] + half) / (2.0 * half) * lanes)
@@ -107,6 +113,7 @@ class SpeedPlan:
             per = n // surface.segments + 1
             for d in range(-per // 2, per // 2 + 1):
                 estimate[(i + d) % n] = factor
+        return 0 if end >= surface.segments else end
 
 
 def _to_samples(nodes, v, n):

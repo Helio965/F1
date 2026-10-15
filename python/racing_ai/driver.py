@@ -34,7 +34,14 @@ TWO_PI = 2.0 * math.pi
 
 
 class Perception:
-    """Ring buffer of every car's (s, n, u) for delayed observation."""
+    """Ring buffer of every car's (s, n, u) for delayed observation.
+
+    A driver sees the others with a reaction delay but anticipates their
+    motion: the delayed snapshot is dead-reckoned forward by ``u * delay``
+    along the track, using only the observed (delayed) speed. Without this,
+    every opponent would look ``u * delay`` metres further back than it is
+    when compared with the driver's own, current position.
+    """
 
     def __init__(self, cars, history_seconds=0.6, dt=1.0 / 120.0):
         self.size = int(history_seconds / dt) + 2
@@ -48,7 +55,11 @@ class Perception:
 
     def observe(self, delay):
         steps = min(self.size - 1, int(delay / self.dt))
-        return self.buffer[(self.head - steps) % self.size]
+        snapshot = self.buffer[(self.head - steps) % self.size]
+        if steps == 0:
+            return snapshot
+        lag = steps * self.dt
+        return [(s + u * lag, n, u) for (s, n, u) in snapshot]
 
 
 def pace_mode(car, tracker, laps_total):
@@ -81,6 +92,7 @@ class AIDriver:
         self.last_lap = -1
         self.decision_timer = 0.0
         self.target_speed = 0.0
+        self.target_rate = 0.0  # m/s^2, slope of the braking-envelope target
         self.tactical = 0.0
         self.tactical_target = 0.0
         self.overtaking = None  # (target car index, side, started time)
@@ -172,6 +184,7 @@ class AIDriver:
         horizon = u * u / (2.0 * max(decel, 3.0)) + 25.0 + sk.braking_margin
         stride = 3
         target = float("inf")
+        rate = 0.0
         steps = int(horizon / ds) + 1
         line_k = self.plan.line_k
         deviation = me.n - self.plan.offset(me.s)
@@ -191,6 +204,9 @@ class AIDriver:
             reach = math.sqrt(v_j * v_j + 2.0 * decel * max(d, 0.0))
             if reach < target:
                 target = reach
+                # Along the braking curve v^2 = v_j^2 + 2 a d the target falls at
+                # dv/dt = -a u / v as the car advances: speed feed-forward.
+                rate = -decel * u / max(reach, 1.0) if d > 0.0 else 0.0
         # --- opponents (delayed perception)
         observed = perception.observe(sk.reaction_time)
         my_s, my_n = me.s, me.n
@@ -288,6 +304,7 @@ class AIDriver:
                 elif self.defended_zone == self._zone_key(idx):
                     self.tactical_target = self.tactical
         self.target_speed = min(target, self.follow_limit, squeeze_speed)
+        self.target_rate = rate if self.target_speed == target else 0.0
         # start: hold the grid lane for the first metres
         if me.distance < 180.0 and self.overtaking is None:
             self.tactical_target = self.grid_lane - self.plan.offset(my_s)
@@ -296,6 +313,7 @@ class AIDriver:
             self.overtaking = None
             self.tactical_target = 0.0
             self.target_speed = min(self.target_speed, max(12.0, 0.6 * u))
+            self.target_rate = 0.0
 
     def _zone_key(self, idx):
         return int(idx * self.sim.track.ds / 150.0)
@@ -374,7 +392,9 @@ class AIDriver:
         ellipse = math.sqrt(max(0.0, 1.0 - util * util))
         a_avail = mu_g * ellipse
         a_brake_avail = mu_g * max(0.45, ellipse)
-        a_des = 3.0 * (v_target - u)
+        # proportional speed loop plus the target's own slope while the braking
+        # envelope is active (otherwise the car lags a falling target by a/3)
+        a_des = 3.0 * (v_target - u) + self.target_rate * clamp(1.0 - (v_target - u) / 3.0, 0.0, 1.0)
         resist = me.drag + 0.015 * mass * g
         env = self.plan.envelopes[-2]
         if a_des >= 0.0:

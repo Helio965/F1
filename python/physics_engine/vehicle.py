@@ -249,8 +249,12 @@ class Vehicle:
         g_n -= u * r * math.sin(bank)  # banked-surface share of the centripetal load
         gx = g_t * cd + g_l * sd
         gy = -g_t * sd + g_l * cd
-        self.pitch_road = -math.atan(grade * cd)
-        self.roll_road = bank * cd
+        # Attitude of the road plane under the car (for rendering): surface
+        # height h = grade * t + tan(bank) * l in the track frame, read along
+        # the car's forward (cos dpsi, sin dpsi) and left (-sin dpsi, cos dpsi).
+        tan_bank = math.tan(bank)
+        self.pitch_road = -math.atan(grade * cd + tan_bank * sd)
+        self.roll_road = math.atan(tan_bank * cd - grade * sd)
 
         # 4. aerodynamics
         atm = env.atmosphere

@@ -27,15 +27,33 @@ RUNOFF_TYPES = ("mixed", "grass", "gravel", "asphalt")
 DEFAULT_RUNOFF_WIDTH = 6.5  # m beyond the asphalt edge to the barrier
 
 
+def _number(value, default):
+    """float(value), ``default`` when absent and NaN when not a number.
+
+    NaN is rejected by :mod:`track_analyzer.validation` as a fatal error, so a
+    malformed document never reaches the tables (or non-standard JSON).
+    """
+    if value is None:
+        return float(default)
+    if isinstance(value, bool):
+        return float("nan")
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float("nan")
+
+
 def normalise(doc):
     points = []
     for p in doc.get("points", []):
+        if not isinstance(p, dict):
+            p = {"x": None, "y": None, "z": float("nan")}
         points.append(
             {
-                "x": float(p.get("x", 0.0)),
-                "y": float(p.get("y", 0.0)),
-                "z": float(p.get("z", 0.0)),
-                "bank": float(p.get("bank", 0.0) or 0.0),
+                "x": _number(p.get("x"), 0.0),
+                "y": _number(p.get("y"), 0.0),
+                "z": _number(p.get("z"), 0.0),
+                "bank": _number(p.get("bank"), 0.0),
             }
         )
     surface = doc.get("surface") or {}
@@ -46,26 +64,20 @@ def normalise(doc):
     runoff_type = runoff.get("type", "mixed")
     if runoff_type not in RUNOFF_TYPES:
         runoff_type = "mixed"
-    try:
-        runoff_width = float(runoff.get("width", DEFAULT_RUNOFF_WIDTH))
-    except (TypeError, ValueError):
-        runoff_width = DEFAULT_RUNOFF_WIDTH
+    runoff_width = _number(runoff.get("width"), DEFAULT_RUNOFF_WIDTH)
     env = doc.get("environment") or {}
-    try:
-        width = float(doc.get("width", 12.0))
-    except (TypeError, ValueError):
-        width = float("nan")
+    version = doc.get("version", 1)
     return {
         "id": str(doc.get("id", "circuit")),
-        "version": int(doc.get("version", 1)),
+        "version": version if isinstance(version, int) and not isinstance(version, bool) else 1,
         "name": str(doc.get("name", "Circuito")),
-        "width": width,
+        "width": _number(doc.get("width"), 12.0),
         "points": points,
         "surface": {"asphalt": asphalt},
         "runoff": {"type": runoff_type, "width": runoff_width},
         "environment": {
-            "altitude": float(env.get("altitude", 0.0) or 0.0),
-            "exposure": float(env.get("exposure", 1.0) if env.get("exposure") is not None else 1.0),
+            "altitude": _number(env.get("altitude"), 0.0),
+            "exposure": _number(env.get("exposure"), 1.0),
         },
     }
 

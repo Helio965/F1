@@ -16,4 +16,4 @@ Conventions (see docs/PHYSICS_EQUATIONS.md):
 - Track lateral coordinate n > 0 is to the left of the travel direction.
 """
 
-ENGINE_VERSION = "1.0.0"
+ENGINE_VERSION = "1.1.0"

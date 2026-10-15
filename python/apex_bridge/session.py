@@ -9,6 +9,7 @@ Rendering frame rate never changes the physics step.
 """
 
 import json
+import math
 import time
 
 from physics_engine.assists import PlayerController
@@ -21,6 +22,7 @@ from racing_ai.driver import AIDriver, Perception
 from racing_ai.planner import SpeedPlan
 
 MAX_STEPS_PER_CALL = 24  # 0.2 s of simulated time
+GRIP_SWEEP_SECONDS = 0.5  # one full refresh of the AI's wet-grip view
 
 
 class Session:
@@ -64,7 +66,9 @@ class Session:
         if brake_bias is not None:
             self.set_brake_bias(float(brake_bias))
         self.accumulator = 0.0
-        self.grip_timer = 0.0
+        segments = sim.track.surface.segments
+        self.grip_cursor = 0
+        self.grip_slice = max(1, math.ceil(segments * FIXED_DT / GRIP_SWEEP_SECONDS))
         self.prev = self._state()
         self.curr = list(self.prev)
         self.step_times = []
@@ -138,10 +142,12 @@ class Session:
         t1 = time.perf_counter()
         sim.step(inputs, FIXED_DT)
         self.perception.record(sim.cars)
-        self.grip_timer += FIXED_DT
-        if self.grip_timer >= 0.5:
-            self.grip_timer = 0.0
-            self.plan.refresh_grip(sim.track.surface, sim.cars[0].pressure[0])
+        # The AI's view of wet grip along the line is refreshed in slices so a
+        # full sweep takes GRIP_SWEEP_SECONDS without an O(track) spike.
+        surface = sim.track.surface
+        self.grip_cursor = self.plan.refresh_grip(
+            surface, sim.cars[0].pressure[0], self.grip_cursor, self.grip_slice
+        )
         t2 = time.perf_counter()
         self.ai_times.append((t1 - t0) * 1000.0)
         self.step_times.append((t2 - t0) * 1000.0)

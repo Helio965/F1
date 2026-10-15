@@ -43,6 +43,16 @@ def validate_document(circuit):
     w = circuit["width"]
     if not math.isfinite(w) or w < MIN_WIDTH or w > MAX_WIDTH:
         errors.append(issue("width.range", "A pista precisa ter entre 8 e 24 metros de largura."))
+    # A value that is not a number cannot be analysed at all (fatal below).
+    non_finite = not all(
+        math.isfinite(v)
+        for v in (
+            w,
+            circuit["runoff"]["width"],
+            circuit["environment"]["exposure"],
+            circuit["environment"]["altitude"],
+        )
+    )
     bad = any(
         not all(math.isfinite(p[k]) for k in ("x", "y", "z", "bank"))
         or abs(p["x"]) > MAX_COORDINATE
@@ -69,6 +79,8 @@ def validate_document(circuit):
     alt = circuit["environment"]["altitude"]
     if not math.isfinite(alt) or alt < -500.0 or alt > 4500.0:
         errors.append(issue("environment.altitude", "A altitude deve estar entre -500 e 4500 metros."))
+    if non_finite:
+        return errors, warnings, True
     duplicate = False
     n = len(pts)
     for i in range(n):

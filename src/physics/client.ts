@@ -27,6 +27,7 @@ export interface PhysicsStatus {
   initMs?: number;
   importMs?: number;
   engine?: string;
+  analyzer?: string;
   pyodide?: string;
 }
 
@@ -60,6 +61,7 @@ export class PhysicsClient {
             initMs: message.initMs,
             importMs: message.importMs,
             engine: message.versions.engine,
+            analyzer: message.versions.analyzer,
             pyodide: message.pyodideVersion,
           });
           resolve();

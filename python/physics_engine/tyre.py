@@ -36,7 +36,13 @@ SURFACE_CONVECTION = (15.0, 0.9)  # W/K = a + b * speed
 CORE_CONVECTION = (5.0, 0.3)  # W/K = a + b * speed
 ROAD_CONDUCTANCE = 60.0  # W/K between tread and road surface
 WATER_COOLING = 220.0  # W/K extra surface cooling from a water film (saturating with depth)
-ROLLING_HEAT_FACTOR = 3.0  # carcass hysteresis heat relative to rolling-resistance power
+# Carcass hysteresis heat relative to rolling-resistance power. The part above
+# 1 stands for the cyclic carcass flex under cornering/traction loads that C_rr
+# does not cover; it fades out as the core passes its working window because
+# the rubber loss factor (tan delta) falls with temperature above the glass
+# transition. The rolling-resistance power itself (energy really taken from
+# the car) always heats the carcass. Calibrated, not fitted to telemetry.
+ROLLING_HEAT_FACTOR = 3.0
 
 # Horne & Dreher: V_p [knots] = 9 sqrt(p [psi]); converted to m/s and kPa.
 HORNE_COEFFICIENT = 9.0 * MPS_PER_KNOT / math.sqrt(KPA_PER_PSI)  # ~1.763 m/s per sqrt(kPa)
@@ -180,6 +186,9 @@ def update_thermal(state, index, dt, slide_power, speed, fz, rr, air_t, track_t,
     Surface: C_s dT_s = (eta P_slide - h_s(T_s - T_air) - h_r(T_s - T_road)
                          - k_sc(T_s - T_c) - h_w(T_s - T_air)) dt
     Core:    C_c dT_c = (P_hyst + k_sc(T_s - T_c) - h_c(T_c - T_air)) dt
+    with P_hyst = C_rr Fz V (1 + (ROLLING_HEAT_FACTOR - 1) f(T_c)), where
+    f falls smoothly from 1 at T_opt to 0 at T_opt + window, plus a share of
+    the sliding power conducted into the carcass.
     """
     ts = state.surface_t[index]
     tc = state.core_t[index]
@@ -189,7 +198,8 @@ def update_thermal(state, index, dt, slide_power, speed, fz, rr, air_t, track_t,
     h_c = CORE_CONVECTION[0] + CORE_CONVECTION[1] * v
     k = SURFACE_CORE_CONDUCTANCE
     heat_s = compound.heat_fraction * slide_power
-    heat_c = ROLLING_HEAT_FACTOR * rr * fz * v + (1.0 - compound.heat_fraction) * 0.25 * slide_power
+    flex = 1.0 - smoothstep(compound.temp_optimal, compound.temp_optimal + compound.temp_window, tc)
+    heat_c = rr * fz * v * (1.0 + (ROLLING_HEAT_FACTOR - 1.0) * flex) + (1.0 - compound.heat_fraction) * 0.25 * slide_power
     # Backward Euler on the linear loss terms (unconditionally stable).
     a_s = dt / SURFACE_HEAT_CAPACITY
     a_c = dt / CORE_HEAT_CAPACITY

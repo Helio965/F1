@@ -32,7 +32,7 @@ from .profiles import compute_profile, zones
 from .racing_line import line_geometry, racing_line
 from .validation import validate_document, validate_geometry
 
-ANALYZER_VERSION = "1.0.0"
+ANALYZER_VERSION = "1.1.0"
 CONTRACT = "apex.track-analysis/1"
 
 
@@ -76,7 +76,10 @@ def analyze(document, level="full", vehicles=None):
     n = len(table["x"])
     half = 0.5 * circuit["width"]
     local = max(circuit["width"] * 3.0, 40.0)
-    clear_l, clear_r = geo.clearances(table, local)
+    # Barriers sit up to half + run-off + 4 m out (segmentation.trackside_layout);
+    # two facing sections need to see each other at twice that distance.
+    reach = 2.0 * (half + circuit["runoff"]["width"] + 4.0) + 2.0
+    clear_l, clear_r = geo.clearances(table, local, max(80.0, reach))
     corners = seg.find_corners(table)
     straights = seg.find_straights(table, corners)
     layout = seg.trackside_layout(circuit, table, corners, clear_l, clear_r)

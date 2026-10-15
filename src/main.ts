@@ -247,14 +247,25 @@ async function ensureAnalysis(c: Circuit, level: "quick" | "full"): Promise<Trac
   const key = docKey(c);
   const memo = analysisMemo.get(key);
   if (memo && (level === "quick" || memo.level === "full")) return memo;
-  const version = `${client.status.engine}`;
+  const version = `${client.status.engine}|${client.status.analyzer}`;
   const storeKey = await sha256(`${key}|${version}`);
   if (level === "full") {
     const stored = await storage.analysis(storeKey).catch(() => undefined);
-    if (stored && stored.level === "full" && stored.engine_version === client.status.engine) {
-      await client.remember(stored);
-      analysisMemo.set(key, stored);
-      return stored;
+    if (
+      stored &&
+      stored.level === "full" &&
+      stored.engine_version === client.status.engine &&
+      stored.analyzer_version === client.status.analyzer
+    ) {
+      // The worker re-checks the versions; a refused cache is simply recomputed.
+      const accepted = await client.remember(stored).then(
+        () => true,
+        () => false,
+      );
+      if (accepted) {
+        analysisMemo.set(key, stored);
+        return stored;
+      }
     }
   }
   const result = await client.analyze<TrackAnalysis>(analysisDocument(c), level);

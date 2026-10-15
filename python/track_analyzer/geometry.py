@@ -115,10 +115,13 @@ def validation_line(spline):
     return out
 
 
-def clearances(table, local_window):
+def clearances(table, local_window, radius=80.0):
     """Distance from each sample to the nearest non-local sample, per side.
 
-    Returns (left, right) lists; ``inf`` when nothing is nearby.
+    Only samples within about ``radius`` metres are searched (spatial hash);
+    returns (left, right) lists with ``inf`` when nothing is that close.
+    Callers that cap barrier offsets with the clearance must pass a radius of
+    at least twice the largest offset they may place.
     """
     xs, zs = table["x"], table["z"]
     txs, tzs = table["tx"], table["tz"]
@@ -132,7 +135,7 @@ def clearances(table, local_window):
         grid.setdefault(key, []).append(i)
     left = [float("inf")] * n
     right = [float("inf")] * n
-    reach = 2  # cells: 80 m search radius
+    reach = max(2, int(math.ceil(radius / cell)))
     for i in range(n):
         cx = int(math.floor(xs[i] / cell))
         cz = int(math.floor(zs[i] / cell))
