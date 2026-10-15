@@ -77,6 +77,10 @@ def surface_grid():
     return version, segments, lanes, array("f", grid)
 
 
+def ping():
+    return 1
+
+
 def metrics():
     return json.dumps(_session.metrics(), separators=(",", ":"))
 

@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { Circuit } from "../src/core/types";
 import {
   cloneCircuit,
   defaultCircuit,
+  exportCircuit,
   importCircuit,
   reviseCircuit,
 } from "../src/circuits/model";
-import { sampleCircuit, validateCircuit } from "../src/circuits/geometry";
+import { sampleCircuit } from "../src/circuits/geometry";
 
 describe("circuit document safety", () => {
   it("round-trips a versioned export while revoking imported homologation", () => {
@@ -18,8 +18,36 @@ describe("circuit document safety", () => {
     expect(imported).toEqual(defaultCircuit());
     expect(imported.homologatedVersion).toBeUndefined();
     expect(() =>
-      importCircuit(JSON.stringify({ ...circuit, schemaVersion: 2 })),
+      importCircuit(JSON.stringify({ ...circuit, schemaVersion: 3 })),
     ).toThrow(/não suportada/);
+  });
+  it("round-trips schema 2 physical fields (banking, asphalt, run-off, environment)", () => {
+    const circuit = defaultCircuit();
+    circuit.points[3].bank = 4.5;
+    circuit.surface = { asphalt: "abrasive" };
+    circuit.runoff = { type: "gravel", width: 9 };
+    circuit.environment = { altitude: 800, exposure: 0.8 };
+    circuit.homologatedVersion = 1;
+    circuit.homologatedHash = "abc";
+    const imported = importCircuit(exportCircuit(circuit));
+    expect(imported.points[3].bank).toBe(4.5);
+    expect(imported.surface).toEqual({ asphalt: "abrasive" });
+    expect(imported.runoff).toEqual({ type: "gravel", width: 9 });
+    expect(imported.environment).toEqual({ altitude: 800, exposure: 0.8 });
+    expect(imported.homologatedVersion).toBeUndefined();
+    expect(imported.homologatedHash).toBeUndefined();
+    for (const patch of [
+      { surface: { asphalt: "ice" } },
+      { runoff: { type: "lava", width: 5 } },
+      { runoff: { type: "grass", width: 400 } },
+      { environment: { altitude: 99999, exposure: 1 } },
+    ])
+      expect(() => importCircuit(JSON.stringify({ ...circuit, ...patch }))).toThrow();
+    expect(() =>
+      importCircuit(
+        JSON.stringify({ ...circuit, points: [{ x: 0, y: 0, z: 0, bank: 90 }, ...circuit.points] }),
+      ),
+    ).toThrow();
   });
   it("rejects unknown fields and unsafe IDs, versions, coordinate values and document sizes", () => {
     const circuit = defaultCircuit();
@@ -60,6 +88,7 @@ describe("circuit document safety", () => {
     const revised = reviseCircuit(original, { width: 15 });
     expect(revised.version).toBe(2);
     expect(revised.homologatedVersion).toBeUndefined();
+    expect(revised.homologatedHash).toBeUndefined();
     revised.points[0].x = 999;
     expect(original.width).toBe(13);
     expect(original.points[0].x).toBe(-170);
@@ -69,12 +98,12 @@ describe("circuit document safety", () => {
   });
 });
 
-describe("closed circuit geometry and homologation", () => {
+// Geometric validation moved to the Python analyser (python/tests/test_track_analyzer.py).
+describe("closed circuit visual sampling", () => {
   it("provides a playable default circuit with finite, arc-spaced geometry and a smooth seam", () => {
     const circuit = defaultCircuit(),
       geometry = sampleCircuit(circuit),
       samples = geometry.samples;
-    expect(validateCircuit(circuit).errors).toEqual([]);
     expect(geometry.length).toBeGreaterThan(900);
     expect(geometry.length).toBeLessThan(1200);
     expect(samples).toHaveLength(768);
@@ -90,51 +119,5 @@ describe("closed circuit geometry and homologation", () => {
     expect(
       samples[0].tx * samples[767].tx + samples[0].tz * samples[767].tz,
     ).toBeGreaterThan(0.98);
-  });
-  it("rejects a crossing centre line, including an otherwise long and wide track", () => {
-    const circuit: Circuit = {
-      id: "crossed",
-      name: "Crossed",
-      version: 1,
-      width: 12,
-      points: [
-        { x: -200, y: 0, z: -100 },
-        { x: -100, y: 0, z: -50 },
-        { x: 200, y: 0, z: 100 },
-        { x: 200, y: 0, z: -100 },
-        { x: 100, y: 0, z: -50 },
-        { x: -200, y: 0, z: 100 },
-      ],
-    };
-    expect(
-      validateCircuit(circuit).errors.some((error) => error.includes("cruza")),
-    ).toBe(true);
-  });
-  it("rejects insufficient length, repeated closure points and dangerous elevation changes", () => {
-    const short = defaultCircuit();
-    short.points = short.points.map((p) => ({
-      x: p.x * 0.1,
-      y: 0,
-      z: p.z * 0.1,
-    }));
-    expect(
-      validateCircuit(short).errors.some((error) =>
-        error.includes("300 metros"),
-      ),
-    ).toBe(true);
-    const duplicate = defaultCircuit();
-    duplicate.points.push({ ...duplicate.points[0] });
-    expect(
-      validateCircuit(duplicate).errors.some((error) =>
-        error.includes("vizinhos"),
-      ),
-    ).toBe(true);
-    const steep = defaultCircuit();
-    steep.points[2].y = 100;
-    expect(
-      validateCircuit(steep).errors.some((error) =>
-        error.includes("Inclinação"),
-      ),
-    ).toBe(true);
   });
 });

@@ -360,4 +360,15 @@ def vehicle_summary(params):
             for c in params.compounds
         ],
         "notes": params.notes,
+        "geometry": {
+            "wheelbase": params.wheelbase,
+            "front": params.wheelbase * (1.0 - params.front_weight_fraction),
+            "rear": params.wheelbase * params.front_weight_fraction,
+            "radius_front": params.tyre_radius_front,
+            "radius_rear": params.tyre_radius_rear,
+            "length": params.length,
+            "width": params.width,
+        },
+        "brake_bias": params.brake_bias,
+        "fuel_capacity": params.fuel_capacity,
     }

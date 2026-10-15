@@ -1,5 +1,4 @@
 import type {
-  CarState,
   Circuit,
   CircuitGeometry,
   DriverInput,
@@ -51,6 +50,28 @@ interface Dynamics {
   reaction: number;
   aiInput: DriverInput;
   lane: number;
+}
+
+/** Car state of the legacy TypeScript model (kept only until the Python engine is validated). */
+interface CarState {
+  id: number;
+  name: string;
+  color: string;
+  x: number;
+  y: number;
+  z: number;
+  heading: number;
+  speed: number;
+  gear: number;
+  rpm: number;
+  lap: number;
+  lapTime: number;
+  bestLap: number | null;
+  progress: number;
+  finished: boolean;
+  fuel: number;
+  tyreWear: number;
+  damage: number;
 }
 
 /** Deterministic, accessible bicycle model; not a professional engineering simulator.
