@@ -1,19 +1,17 @@
 import type { Circuit, GraphicsSettings } from "../core/types";
 import type { BenchmarkReport } from "../graphics/benchmark";
+import type { TrackAnalysis } from "../physics/analysis";
 const dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
-  const request = indexedDB.open("apex-racing-lab", 1);
+  const request = indexedDB.open("apex-racing-lab", 2);
   request.onupgradeneeded = () => {
-    for (const name of ["circuits", "benchmarks", "settings"])
-      request.result.createObjectStore(name);
+    const db = request.result;
+    for (const name of ["circuits", "benchmarks", "settings", "analysis"])
+      if (!db.objectStoreNames.contains(name)) db.createObjectStore(name);
   };
   request.onsuccess = () => resolve(request.result);
-  request.onerror = () =>
-    reject(new Error("Não foi possível abrir o armazenamento local."));
+  request.onerror = () => reject(new Error("Não foi possível abrir o armazenamento local."));
 });
-async function read<T>(
-  store: string,
-  key: IDBValidKey,
-): Promise<T | undefined> {
+async function read<T>(store: string, key: IDBValidKey): Promise<T | undefined> {
   const db = await dbPromise;
   return new Promise((resolve, reject) => {
     const req = db.transaction(store).objectStore(store).get(key);
@@ -47,6 +45,8 @@ export const storage = {
   settings: () => read<GraphicsSettings>("settings", "graphics"),
   saveSettings: (s: GraphicsSettings) => write("settings", "graphics", s),
   readPreference: <T>(key: string) => read<T>("settings", key),
-  savePreference: (key: string, value: unknown) =>
-    write("settings", key, value),
+  savePreference: (key: string, value: unknown) => write("settings", key, value),
+  /** Analysis cache keyed by SHA-256 of the physical document + versions. */
+  analysis: (key: string) => read<TrackAnalysis>("analysis", key),
+  saveAnalysis: (key: string, value: TrackAnalysis) => write("analysis", key, value),
 };

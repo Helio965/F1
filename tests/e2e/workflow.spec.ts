@@ -128,3 +128,20 @@ test("draws a custom closed circuit, homologates and reloads its saved version",
     page.locator(".circuit-card").filter({ hasText: "Circuito de integração" }),
   ).toContainText("Homologado");
 });
+
+test("measures the Python physics engine inside the browser worker", async ({ page }) => {
+  test.setTimeout(300000);
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/?quality=low");
+  await page.getByRole("button", { name: "Benchmark", exact: true }).click();
+  await expect(page.locator("#physics-status")).toContainText(/pronto/i, { timeout: 60000 });
+  await page.locator("#physics-bench-btn").click();
+  const rows = page.locator("#physics-bench-result tbody tr");
+  await expect(rows).toHaveCount(4, { timeout: 240000 });
+  // Every scenario reports a finite, positive mean step time and real-time load.
+  for (const text of await rows.allTextContents()) expect(text).toMatch(/\d+\.\d{3} ms/);
+  await expect(page.locator("#physics-bench-result")).toContainText("Aurora Park");
+  await expect(page.locator("#physics-bench-result")).toContainText("Latência ida e volta");
+  expect(errors).toEqual([]);
+});
