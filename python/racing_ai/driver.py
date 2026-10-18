@@ -26,7 +26,7 @@ Everything is seeded and deterministic.
 
 import math
 
-from physics_engine.mathutil import SplitMix64, clamp
+from physics_engine.mathutil import SplitMix64, clamp, wrap_angle
 
 from .difficulty import skill as skill_for
 
@@ -378,6 +378,14 @@ class AIDriver:
         delta = math.atan(wheelbase * curvature)
         # yaw-rate damping toward the pure-pursuit yaw rate
         delta += 0.35 * (curvature * speed - me.r) * wheelbase / speed
+        # oversteer felt through the seat: rear slip angle clearly beyond the
+        # front -> countersteer toward the direction of travel (body slip angle)
+        front_a = 0.5 * (abs(me.alpha[0]) + abs(me.alpha[1]))
+        rear_a = 0.5 * (abs(me.alpha[2]) + abs(me.alpha[3]))
+        oversteer = rear_a > front_a + 0.025 and rear_a > 0.5 * me.tyre.alpha_peak
+        if oversteer and u > 3.0:
+            beta = math.atan2(me.v, u)
+            delta += 0.8 * sk.slip_management * beta
         steer = clamp(-delta / me.p.max_steer, -1.0, 1.0)
         # pedals: desired acceleration bounded by the friction ellipse, using the
         # grip the driver currently feels (mean peak mu of the four tyres)
@@ -419,12 +427,15 @@ class AIDriver:
             throttle *= 1.0 - ease
             if v_target < u + 2.0:
                 brake = max(brake, 0.12 * ease * sk.slip_management)
-        # oversteer: rear slip angle clearly beyond the front -> lift
-        front_a = 0.5 * (abs(me.alpha[0]) + abs(me.alpha[1]))
-        rear_a = 0.5 * (abs(me.alpha[2]) + abs(me.alpha[3]))
-        if rear_a > front_a + 0.025 and rear_a > 0.5 * me.tyre.alpha_peak:
-            throttle *= 1.0 - 0.8 * sk.slip_management
         kp = me.tyre.kappa_peak
+        if oversteer:
+            if min(me.kappa[2], me.kappa[3]) > 0.3 * kp:
+                # power oversteer: the driven wheels are pushing -> lift
+                throttle *= 1.0 - 0.8 * sk.slip_management
+            elif brake < 0.05:
+                # lift-off oversteer: engine braking is using the rear grip;
+                # a little throttle neutralises it and loads the rear axle
+                throttle = max(throttle, 0.15 * sk.slip_management)
         # rear locking on overrun (engine braking): a throttle blip frees the axle
         rear_lock = min(me.kappa[2], me.kappa[3])
         if brake < 0.05 and rear_lock < -1.2 * kp:
@@ -436,10 +447,12 @@ class AIDriver:
         # smooth pedal application (human actuation)
         self.throttle += clamp(throttle - self.throttle, -8.0 * dt, 5.0 * dt)
         self.brake += clamp(brake - self.brake, -8.0 * dt, 9.0 * dt)
-        # recovery when stuck (marshal reset, same rule as the player's reset)
-        if abs(u) < 1.0 and self.target_speed > 5.0:
+        # recovery when stuck or facing the wrong way after a spin (marshal
+        # reset, same rule as the player's reset key)
+        wrong_way = abs(wrap_angle(me.dpsi)) > 1.75 and abs(u) < 25.0
+        if (abs(u) < 1.0 and self.target_speed > 5.0) or wrong_way:
             self.stuck_time += dt
-            if self.stuck_time > 4.0:
+            if self.stuck_time > (2.0 if wrong_way else 4.0):
                 sim.reset_car(self.index)
                 self.stuck_time = 0.0
         else:

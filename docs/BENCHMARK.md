@@ -16,3 +16,12 @@ CPU é o tempo de submissão JavaScript da chamada de renderização, não o tem
 O relatório inclui amostras brutas, data UTC armazenada (interface em America/Sao_Paulo), identificação da cena, resolução real do drawing buffer, perfil, clima, renderizador e estatísticas. Histórico no IndexedDB e exportação JSON. Não comparar cenários, resoluções ou GPUs diferentes como se fossem iguais.
 
 A RTX 3050 Laptop não está acessível na nuvem. O teste completo do navegador nesta máquina só demonstra execução da infraestrutura com o renderizador disponível, sem prever resultados no notebook.
+
+## Benchmark do motor físico (Python)
+
+Separado do benchmark gráfico. Mede o custo do núcleo Python no runtime em que ele realmente roda.
+
+- **No jogo** (página Benchmark → “Medir motor físico”): o Web Worker executa `apex_bridge.bench.run_benchmarks(quick=True)` no Pyodide e a página mostra, para 2, 6 e 10 carros (seco) e 10 carros (chuva intensa), o passo fixo de 1/120 s (média, p95, p99, máximo), o custo por carro, a parcela da IA e a carga em tempo real (tempo do passo ÷ 8,33 ms); a análise completa de duas pistas; o custo de um quadro de 60 Hz (dois passos + snapshot); o pico de memória Python (`tracemalloc`); e a latência de ida e volta de uma mensagem vazia ao Worker. Todos os carros são dirigidos pela IA (nível Médio, semente fixa 7), após 1 s de aquecimento e 5 s simulados de medição.
+- **Fora do navegador**: `npm run bench:physics` roda o mesmo módulo no Pyodide sob Node; `npm run bench:physics -- --compare` roda também o CPython nativo (`cd python && python3 -m apex_bridge.bench --json`) e imprime a razão entre os dois.
+
+Limites do método: no navegador, `performance.now()` tem resolução reduzida sem isolamento de origem cruzada (degraus de 0,1 ms aparecem em p99/máximo); o Worker compartilha a CPU com a renderização e com outras abas; os resultados variam com o processador e não podem ser transferidos para outra máquina. Os números medidos neste desenvolvimento, com o ambiente identificado, estão em [PYTHON_BROWSER_INTEGRATION.md](PYTHON_BROWSER_INTEGRATION.md) e [PHYSICS_VALIDATION.md](PHYSICS_VALIDATION.md).
