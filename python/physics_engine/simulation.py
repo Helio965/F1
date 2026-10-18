@@ -32,10 +32,14 @@ class Environment:
 
 
 def default_compound(params, weather):
+    """Starting tyre for the weather: wets in heavy rain; intermediates on a
+    damp or drying track, or wets for cars of eras without intermediates."""
     if weather == "rain" and "wet" in params.compounds:
         return "wet"
-    if weather in ("light-rain", "drying") and "intermediate" in params.compounds:
-        return "intermediate"
+    if weather in ("light-rain", "drying"):
+        for compound in ("intermediate", "wet"):
+            if compound in params.compounds:
+                return compound
     return params.default_compound
 
 

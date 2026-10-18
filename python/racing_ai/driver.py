@@ -102,6 +102,7 @@ class AIDriver:
         self.throttle = 0.0
         self.brake = 0.0
         self.stuck_time = 0.0
+        self.standstill_time = 0.0
         self.follow_limit = float("inf")
         self.last_steer = 0.0
         self.local_wet = 1.0
@@ -122,20 +123,30 @@ class AIDriver:
             + 0.1 * math.sin(TWO_PI * f[2] * t + p[2])
         )
 
-    def _local_wet(self):
-        """Wet-grip factor observed in the car's own lane over the next ~60 m."""
+    def _local_wet(self, reach=65.0):
+        """Wet-grip factor the driver sees on the path ahead (up to ``reach``
+        metres): the racing line shifted by the current tactical offset, which
+        is where the car is going to brake and turn. Deeper water anywhere on
+        that path weighs more than the average (0.5 mean + 0.5 worst)."""
         me = self.sim.cars[self.index]
         surface = self.sim.track.surface
         track = self.sim.track
         total = 0.0
+        worst = 0.0
         count = 0
-        for d in (5.0, 20.0, 35.0, 50.0, 65.0):
+        d = 5.0
+        while d <= reach:
             s = (me.s + d) % track.length
             idx = track.index_at(s)
-            cell, _ = surface.cell(s, me.n, idx)
-            total += surface.film(cell, me.n, track.half_width[idx])
+            half = track.half_width[idx]
+            n = clamp(self.plan.offset(s) + self.tactical_target, -half, half) if d > 20.0 else me.n
+            cell, _ = surface.cell(s, n, idx)
+            h = surface.film(cell, n, half)
+            total += h
+            worst = max(worst, h)
             count += 1
-        film = total / count
+            d += 15.0
+        film = 0.5 * (total / count + worst)
         if film <= 0.005:
             return 1.0
         factor, _ = self.plan.tyre.water_factor(
@@ -174,11 +185,16 @@ class AIDriver:
             self.lap_factor = 1.0 + sk.consistency * clamp(self.rng.gauss(), -2.5, 2.5)
         self.mode, self.grip_adjust = pace_mode(me, tracker, sim.laps)
         # --- speed target over the preview window (braking envelope)
-        self.local_wet = self._local_wet() if sim.atmosphere.rain_rate_mm_h > 0.0 or me.film[0] > 0.0 else 1.0
         n = track.n
         ds = track.ds
         idx = me.track_index
         u = max(me.u, 0.0)
+        # Off the dry line the driver judges the whole braking distance by the
+        # water on the path actually taken (conservative 6 m/s^2 estimate).
+        off_line = abs(self.tactical_target) > 1.0 or abs(me.n - self.plan.offset(me.s)) > 1.5
+        near_reach = max(80.0, u * u / 12.0 + 25.0) if off_line else 80.0
+        wet_track = sim.atmosphere.rain_rate_mm_h > 0.0 or me.film[0] > 0.0
+        self.local_wet = self._local_wet(min(near_reach, 200.0)) if wet_track else 1.0
         grip_here = self._grip_level(idx, True)
         decel = self.plan.brake_capability(max(u, 10.0), grip_here) * 0.92
         horizon = u * u / (2.0 * max(decel, 3.0)) + 25.0 + sk.braking_margin
@@ -190,7 +206,7 @@ class AIDriver:
         deviation = me.n - self.plan.offset(me.s)
         for k in range(0, steps, stride):
             j = (idx + k) % n
-            v_j = self.plan.target_speed(j, self._grip_level(j, k * ds < 80.0))
+            v_j = self.plan.target_speed(j, self._grip_level(j, k * ds < near_reach))
             # off the racing line: the path followed is the line shifted by the
             # current deviation dn, with curvature kappa' = kappa / (1 - dn kappa)
             if k * ds < 80.0 and abs(deviation) > 0.5:
@@ -231,6 +247,10 @@ class AIDriver:
                 behind_gap, behind = -gap, (j, s_o, n_o, u_o)
         half = track.half_width[idx]
         limit_n = half - 1.3
+        # where a pass may be aimed: the margin to the track edge grows with
+        # speed (path overshoot) and in the wet (deeper water off-line)
+        wet_here = self.plan.grip_estimate[idx] < 0.97 or self.local_wet < 0.97
+        pass_n = limit_n - 0.012 * u - (0.8 if wet_here else 0.0)
         self.follow_limit = float("inf")
         # peripheral awareness of cars alongside (short delay) -> lateral corridor
         near = perception.observe(min(sk.reaction_time, 0.12))
@@ -250,8 +270,11 @@ class AIDriver:
                     hi = min(hi, n_o - width)
                 else:
                     lo = max(lo, n_o + width)
-                if (lo > hi or lo > limit_n or hi < -limit_n) and gap > -me.p.length:
-                    # no lateral room on track next to this car: back out of the overlap
+                yields = gap > 0.5 or (gap > -0.5 and j < self.index)
+                if (lo > hi or lo > limit_n or hi < -limit_n) and yields:
+                    # no lateral room on track next to this car: the car that is
+                    # behind backs out of the overlap (the one ahead keeps going,
+                    # otherwise both would wait for each other)
                     squeeze_speed = min(squeeze_speed, max(0.0, u_o - 2.0))
         if lo > hi:
             lo = hi = my_n
@@ -270,7 +293,7 @@ class AIDriver:
                 and clear < 30.0
                 and self.rng.random() < sk.aggression
             ):
-                side = self._choose_side(idx, n_o, limit_n, alongside)
+                side = self._choose_side(idx, n_o, pass_n, alongside, inside_only=wet_here)
                 if side != 0:
                     self.overtaking = (j, side, sim.time)
             beside = self.overtaking is not None and self.overtaking[0] == j and abs(n_o - my_n) > me.p.width + 0.3
@@ -288,15 +311,20 @@ class AIDriver:
             elif gap < -0.5 * length:
                 gap += length
             blocked = any(abs(n_o - side * limit_n) < me.p.width and k != j for k, n_o in alongside)
-            if gap < -me.p.length - 4.0 or sim.time - started > 7.0 or blocked:
+            want = other[1] + side * (me.p.width + 1.0)
+            # no room left beside the other car on that side: give up the pass
+            # rather than aiming into it
+            squeezed = side * want > pass_n + 0.3
+            if gap < -me.p.length - 4.0 or sim.time - started > 7.0 or blocked or squeezed:
                 self.overtaking = None
             else:
-                absolute = clamp(other[1] + side * (me.p.width + 1.0), -limit_n, limit_n)
+                absolute = clamp(want, -pass_n, pass_n)
                 self.tactical_target = absolute - self.plan.offset(my_s)
         if self.overtaking is None:
             self.tactical_target = 0.0
-            # defence: one move toward the inside before a braking zone
-            if sk.defends and behind is not None and behind[3] > u - 0.5:
+            # defence: one move toward the inside before a braking zone (not in
+            # the wet, where the inside is off the drier racing line)
+            if sk.defends and behind is not None and behind[3] > u - 0.5 and self.plan.grip_estimate[idx] > 0.97:
                 corner_dir = self._next_corner_direction(idx, 220.0)
                 if corner_dir != 0 and self.defended_zone != self._zone_key(idx):
                     self.defended_zone = self._zone_key(idx)
@@ -330,7 +358,10 @@ class AIDriver:
             return 0
         return 1 if best > 0.0 else -1
 
-    def _choose_side(self, idx, other_n, limit_n, alongside):
+    def _choose_side(self, idx, other_n, limit_n, alongside, inside_only=False):
+        """Side (+1 left, -1 right, 0 none) for a pass. In the wet only the
+        inside of the next corner is considered: around the outside the car
+        would brake and turn on the wetter, off-line part of the track."""
         direction = self._next_corner_direction(idx, 250.0)
         me_w = self.sim.cars[self.index].p.width
         options = []
@@ -342,6 +373,8 @@ class AIDriver:
             return 0
         if direction in options:
             return direction
+        if inside_only:
+            return 0
         return options[0]
 
     # ---------------------------------------------------------- control
@@ -457,6 +490,14 @@ class AIDriver:
                 self.stuck_time = 0.0
         else:
             self.stuck_time = 0.0
+        # last resort against any traffic deadlock: 10 s at a standstill
+        if abs(u) < 1.0 and not sim.trackers[self.index].finished:
+            self.standstill_time += dt
+            if self.standstill_time > 10.0:
+                sim.reset_car(self.index)
+                self.standstill_time = 0.0
+        else:
+            self.standstill_time = 0.0
         drs = me.drs_allowed and abs(track.curvature[me.track_index]) < 1.0 / 600.0
         self.last_steer = steer
         return (self.throttle, self.brake, steer, drs)
