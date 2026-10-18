@@ -22,6 +22,7 @@ with public reference envelopes (plausibility ranges, not calibration).
 """
 
 import math
+from dataclasses import replace
 from functools import lru_cache
 
 import pytest
@@ -38,7 +39,9 @@ from track_analyzer import analyze
 
 GE = VEHICLES["ground-effect-2022"]
 DT = 1.0 / 120.0
-RIGHT_LANE_TARGET = -1.67  # m: centre of lane 2 on a 20 m wide track (lanes are 3.33 m)
+# Centre of lane 2 (n in [-3.33, 0] m) on a 20 m wide track: with the 1.6 m track
+# width every wheel stays inside that lane while |n - LANE2_OFFSET| < 0.86 m.
+LANE2_OFFSET = -1.67
 
 
 def _sag(angle):
@@ -170,7 +173,6 @@ def test_heavy_rain_holds_more_water_than_light_rain():
     and the same preset initial state: 15 mm/h keeps more water than 2 mm/h
     at every minute, and also fills a dry surface faster."""
     table = _table(bank_deg=3.0)
-    surfaces = {}
     history = {}
     for weather in ("rain", "light-rain"):
         surface = TrackModel(table).surface
@@ -181,16 +183,19 @@ def test_heavy_rain_holds_more_water_than_light_rain():
             for _ in range(240):
                 surface.update(0.25, atm)
             history[weather].append(_mean(surface.water))
-        surfaces[weather] = surface
-    # Both presets start from the same documented heavy-shower state ...
+    # Both presets start from the same documented heavy-shower state (5 %:
+    # the 80 s spin-up evaporates a little more in the drier light-rain air) ...
     assert history["rain"][0] == pytest.approx(history["light-rain"][0], rel=0.05)
     # ... then the light rain drains toward its lower balance.
     for heavy, light in zip(history["rain"][1:], history["light-rain"][1:]):
         assert heavy > light
     assert history["rain"][-1] > 1.3 * history["light-rain"][-1]
 
-    # From a dry surface (flat circle, 2 simulated minutes).
+    # From a dry surface (flat circle: no drainage, 2 simulated minutes). Water
+    # gained = (I - E) T: heavy rain keeps at least 95 % of I T (its humid air
+    # evaporates < 5 %), light rain at most I T, so the ratio is >= 0.95 * 15/2.
     added = {}
+    rain_in = {}
     for weather in ("rain", "light-rain"):
         surface = TrackModel(_table()).surface
         atm = Atmosphere(weather)
@@ -198,7 +203,10 @@ def test_heavy_rain_holds_more_water_than_light_rain():
         for _ in range(480):
             surface.update(0.25, atm)
         added[weather] = _mean(surface.water)
-    assert added["rain"] > 3.0 * added["light-rain"] > 0.0
+        rain_in[weather] = atm.rain_rate_mm_h / 3600.0 * 120.0
+    assert 0.95 * rain_in["rain"] < added["rain"] <= rain_in["rain"]
+    assert 0.0 < added["light-rain"] <= rain_in["light-rain"]
+    assert added["rain"] >= 0.95 * 7.5 * added["light-rain"]
 
 
 @pytest.mark.verification
@@ -475,11 +483,13 @@ def test_traffic_expels_documented_share_and_lays_rubber():
 
 @pytest.mark.verification
 def test_repeated_traffic_on_one_lane_dries_it_in_light_rain():
-    """Direct SurfaceState check: one simulated car (4 tyres in lane 2, total
-    sweep sum(w_i)/lane_w per pass) every 25 s in light rain leaves lane 2
-    drier than every other lane and than the same lane without traffic. On a
-    flat circle lanes do not exchange water; they only couple through the
-    segment's track temperature, hence the 1e-3 tolerance on untouched lanes."""
+    """Direct SurfaceState check: one pass of a car (one sweep call per tyre,
+    sweep fraction w_i / lane_w, as a full pass over a cell sums to) multiplies
+    lane 2 by prod(1 - 0.6 w_i / lane_w) and leaves the other lanes untouched.
+    A pass every 25 s in light rain leaves lane 2 drier than every other lane
+    and than the same lane without traffic. On a flat circle lanes do not
+    exchange water; they only couple through the segment's track temperature
+    (evaporation), hence the 1e-3 tolerance on untouched lanes."""
     table = _table()
     atm_a = Atmosphere("light-rain")
     atm_b = Atmosphere("light-rain")
@@ -489,16 +499,24 @@ def test_repeated_traffic_on_one_lane_dries_it_in_light_rain():
     control.initialise(atm_b, 1.0)
     lanes = driven.lanes
     lane_w = 2.0 * driven.seg_half[0] / lanes
-    sweep = 2.0 * (GE.tyre_width_front + GE.tyre_width_rear) / lane_w
-    for _ in range(6):
+    widths = (GE.tyre_width_front, GE.tyre_width_front, GE.tyre_width_rear, GE.tyre_width_rear)
+    per_pass = 1.0
+    for width in widths:
+        per_pass *= 1.0 - 0.6 * width / lane_w
+    for lap in range(6):
+        before = list(driven.water)
         for k in range(driven.segments):
-            # one sweep call per tyre, as the vehicle does
-            for width in (GE.tyre_width_front, GE.tyre_width_front, GE.tyre_width_rear, GE.tyre_width_rear):
+            for width in widths:
                 driven.traffic(k * lanes + 2, width / lane_w, 0.0)
+        if lap == 0:
+            for c, (h_new, h_old) in enumerate(zip(driven.water, before)):
+                if c % lanes == 2:
+                    assert h_new == pytest.approx(per_pass * h_old, rel=1e-12)
+                else:
+                    assert h_new == h_old
         for _ in range(100):
             driven.update(0.25, atm_a)
             control.update(0.25, atm_b)
-    assert sweep < 1.0
     d = _lane_means(driven)
     c = _lane_means(control)
     assert d[2] < 0.5 * c[2]
@@ -525,12 +543,12 @@ def test_car_pass_expels_water_as_documented(circle100):
     surface = sim.track.surface
     surface.track_temperature = [atm.air_temperature - 3.0] * surface.segments
     before = list(surface.water)
-    offsets = _drive_lane(sim, RIGHT_LANE_TARGET, 25.0, distance=640.0)
+    offsets = _drive_lane(sim, LANE2_OFFSET, 25.0, distance=640.0)
     lanes = surface.lanes
     lane_w = 2.0 * surface.seg_half[0] / lanes
     n_mean = _mean(offsets)
     kappa = sim.track.curvature[0]
-    assert max(abs(n - RIGHT_LANE_TARGET) for n in offsets) < 0.3  # all wheels stay in lane 2
+    assert max(abs(n - LANE2_OFFSET) for n in offsets) < 0.3  # all wheels stay in lane 2
     widths = 2.0 * (GE.tyre_width_front + GE.tyre_width_rear)
     expected = math.exp(-0.6 * widths * (1.0 - kappa * n_mean) / lane_w)
     ratios = []
@@ -551,10 +569,10 @@ def test_driving_one_lane_in_light_rain_leaves_it_drier(circle100):
     the far lanes are unchanged (rel 1e-4: coupling only via track temperature)."""
     table = circle100["physics_table"]
     driven = Simulation(table, cars=1, laps=5, weather="light-rain")
-    _drive_lane(driven, RIGHT_LANE_TARGET, 25.0, seconds=75.0)
+    _drive_lane(driven, LANE2_OFFSET, 25.0, seconds=75.0)
     assert driven.trackers[0].lap >= 3
     parked = Simulation(table, cars=1, laps=5, weather="light-rain")
-    parked.cars[0].place(0.0, RIGHT_LANE_TARGET, 0.0)
+    parked.cars[0].place(0.0, LANE2_OFFSET, 0.0)
     for _ in range(int(round(75.0 / DT))):
         parked.step([(0.0, 1.0, 0.0, False)])
     d = _lane_means(driven.track.surface)
@@ -573,7 +591,7 @@ def test_rubber_is_laid_where_tyres_slide_in_the_dry(circle100):
     per_lap = {}
     for speed in (20.0, 35.0):
         sim = Simulation(table, cars=1, laps=3, weather="sun")
-        _drive_lane(sim, RIGHT_LANE_TARGET, speed, distance=sim.track.length + 20.0)
+        _drive_lane(sim, LANE2_OFFSET, speed, distance=sim.track.length + 20.0)
         surface = sim.track.surface
         lanes = surface.lanes
         lane2 = surface.rubber[2::lanes]
@@ -849,8 +867,6 @@ def test_vehicle_aquaplaning_onset_tracks_tyre_pressure(oval_quick):
     Raising the cold pressure raises the onset as sqrt(p). Bisection on whole
     vehicle steps; tolerance 1e-3 relative (bisection to 1e-4 m/s)."""
     table = oval_quick["physics_table"]
-    from dataclasses import replace
-
     onsets = {}
     for cold in (150.0, 240.0):
         params = replace(GE, cold_pressure=cold)
@@ -910,7 +926,8 @@ def _stopping_distance(table, weather, v0, compound=None):
 def test_wet_braking_distance_is_longer_than_dry(oval_quick, v0):
     """Same car, same speed, straight-line ABS stop on the oval straight.
     Reference envelope: peak tyre-road friction on asphalt 0.8-0.9 dry and
-    0.5-0.7 wet (Wong, Theory of Ground Vehicles, 4th ed., Table 1.1), i.e.
+    0.5-0.7 wet (Wong, Theory of Ground Vehicles, 4th ed., ch. 1, average
+    coefficients of road adhesion), i.e.
     wet/dry stopping-distance ratio ~1.1-1.8; aero load scales both equally.
     Band [1.1, 2.0] is plausibility, not calibration. Slicks in heavy rain
     must stop later than the wet tyre the preset fits."""
@@ -941,7 +958,7 @@ def test_identical_wet_sessions_give_identical_surface_state(circle100):
     for _ in range(2):
         sim = Simulation(table, cars=1, laps=3, weather="rain")
         initial = list(sim.track.surface.water)
-        _drive_lane(sim, RIGHT_LANE_TARGET, 22.0, seconds=8.0)
+        _drive_lane(sim, LANE2_OFFSET, 22.0, seconds=8.0)
         surface = sim.track.surface
         runs.append(
             (list(surface.water), list(surface.rubber), list(surface.track_temperature), initial, sim.cars[0].x)
